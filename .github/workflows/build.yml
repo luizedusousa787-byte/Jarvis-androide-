@@ -1,0 +1,244 @@
+
+name: Construir APK JARVIS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar projeto
+        uses: actions/checkout@v4
+
+      - name: Instalar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Instalar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Instalar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Preparar SDK
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Criar projeto JARVIS
+        run: |
+          mkdir -p app/src/main/java/com/jarvis/assistant
+
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "JARVIS"
+          include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.7.3" apply false
+          }
+          EOF
+
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+          }
+
+          android {
+              namespace = "com.jarvis.assistant"
+              compileSdk = 35
+
+              defaultConfig {
+                  applicationId = "com.jarvis.assistant"
+                  minSdk = 23
+                  targetSdk = 35
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+              <application
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar"
+                  android:label="JARVIS"
+                  android:usesCleartextTraffic="false">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/jarvis/assistant/MainActivity.java <<'EOF'
+          package com.jarvis.assistant;
+
+          import android.app.*;
+          import android.os.*;
+          import android.content.*;
+          import android.speech.*;
+          import android.view.*;
+          import android.widget.*;
+          import android.graphics.Color;
+          import android.graphics.Typeface;
+          import android.speech.tts.TextToSpeech;
+          import java.util.*;
+
+          public class MainActivity extends Activity {
+              TextView resposta;
+              TextToSpeech voz;
+
+              public void onCreate(Bundle b) {
+                  super.onCreate(b);
+
+                  getWindow().setStatusBarColor(Color.BLACK);
+                  getWindow().setNavigationBarColor(Color.BLACK);
+
+                  LinearLayout tela = new LinearLayout(this);
+                  tela.setOrientation(1);
+                  tela.setGravity(Gravity.CENTER);
+                  tela.setPadding(25,25,25,25);
+                  tela.setBackgroundColor(Color.rgb(5,10,18));
+
+                  TextView titulo = new TextView(this);
+                  titulo.setText("J.A.R.V.I.S");
+                  titulo.setTextSize(36);
+                  titulo.setTextColor(Color.rgb(0,220,255));
+                  titulo.setTypeface(null, Typeface.BOLD);
+                  titulo.setGravity(Gravity.CENTER);
+
+                  TextView subtitulo = new TextView(this);
+                  subtitulo.setText("ASSISTENTE PESSOAL");
+                  subtitulo.setTextColor(Color.WHITE);
+                  subtitulo.setGravity(Gravity.CENTER);
+                  subtitulo.setPadding(0,10,0,40);
+
+                  resposta = new TextView(this);
+                  resposta.setText("Sistemas iniciados. Aguardando comando.");
+                  resposta.setTextColor(Color.WHITE);
+                  resposta.setTextSize(18);
+                  resposta.setGravity(Gravity.CENTER);
+                  resposta.setPadding(10,20,10,40);
+
+                  Button falar = new Button(this);
+                  falar.setText("🎙 FALAR COM JARVIS");
+
+                  Button chat = new Button(this);
+                  chat.setText("ABRIR CHATGPT");
+
+                  tela.addView(titulo);
+                  tela.addView(subtitulo);
+                  tela.addView(resposta);
+                  tela.addView(falar);
+                  tela.addView(chat);
+
+                  setContentView(tela);
+
+                  voz = new TextToSpeech(this, status -> {
+                      if(status == TextToSpeech.SUCCESS)
+                          voz.setLanguage(new Locale("pt","BR"));
+                  });
+
+                  falar.setOnClickListener(v -> ouvir());
+
+                  chat.setOnClickListener(v -> abrirChatGPT());
+
+                  falarComVoz("JARVIS online. Como posso ajudar?");
+              }
+
+              void ouvir() {
+                  Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                  i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                      RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                  i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pt-BR");
+                  i.putExtra(RecognizerIntent.EXTRA_PROMPT, "Diga seu comando");
+
+                  try {
+                      startActivityForResult(i, 10);
+                  } catch(Exception e) {
+                      resposta.setText("Reconhecimento de voz indisponível.");
+                  }
+              }
+
+              protected void onActivityResult(int request, int result, Intent data) {
+                  super.onActivityResult(request,result,data);
+                  if(request == 10 && result == RESULT_OK && data != null) {
+                      ArrayList<String> textos =
+                          data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+                      if(textos != null && !textos.isEmpty()) {
+                          String comando = textos.get(0);
+                          resposta.setText("Você: " + comando);
+                          if(comando.toLowerCase().contains("chatgpt")) {
+                              abrirChatGPT();
+                          } else {
+                              falarComVoz("Comando recebido. Estou pronto para ajudar.");
+                          }
+                      }
+                  }
+              }
+
+              void abrirChatGPT() {
+                  try {
+                      Intent i = getPackageManager().getLaunchIntentForPackage("com.openai.chatgpt");
+                      if(i != null) startActivity(i);
+                      else startActivity(new Intent(Intent.ACTION_VIEW,
+                          android.net.Uri.parse("https://chatgpt.com")));
+                  } catch(Exception e) {
+                      resposta.setText("Não foi possível abrir o ChatGPT.");
+                  }
+              }
+
+              void falarComVoz(String texto) {
+                  if(voz != null)
+                      voz.speak(texto, TextToSpeech.QUEUE_FLUSH, null, "jarvis");
+              }
+
+              protected void onDestroy() {
+                  if(voz != null) {
+                      voz.stop();
+                      voz.shutdown();
+                  }
+                  super.onDestroy();
+              }
+          }
+          EOF
+
+      - name: Construir APK
+        run: gradle assembleDebug
+
+      - name: Disponibilizar APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: JARVIS-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+          
